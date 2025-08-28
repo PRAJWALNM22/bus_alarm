@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bus Stop Alarm (Mapbox & Gemini)</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mapbox GL JS CSS -->
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.css" rel="stylesheet" />
+    <style>
+        /* Custom styles for map height */
+        #map {
+            height: 60vh; /* Make map take 60% of viewport height */
+            width: 100%;
+            border-radius: 0.5rem; /* Rounded corners for the map */
+        }
+        /* Style for Mapbox info window */
+        .mapboxgl-popup-content {
+            font-family: 'Inter', sans-serif;
+            color: #374151;
+            padding: 0.5rem;
+        }
+        .mapboxgl-popup-content h3 {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+        .mapboxgl-popup-content p {
+            font-size: 0.875rem;
+        }
+
+        /* Custom marker styles */
+        .user-marker {
+            background-color: #4285F4; /* Blue */
+            border: 2px solid #FFFFFF;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.4);
+        }
+        .destination-marker {
+            background-color: #EF4444; /* Red */
+            border: 2px solid #FFFFFF;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4);
+            font-size: 1.2rem;
+            color: white;
+            transform: translateY(-50%); /* Adjust anchor for a "pin" effect */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8 font-sans">
+    <div class="container bg-white shadow-lg rounded-xl p-6 sm:p-8 lg:p-10 max-w-4xl w-full">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-6 text-center">
+            🚌 Bus Stop Alarm (Mapbox & Gemini)
+        </h1>
+
+        <div class="flex flex-col md:flex-row gap-6 mb-6">
+            <!-- Map Container -->
+            <div id="map" class="md:w-3/4 rounded-lg shadow-md"></div>
+
+            <!-- Controls and Info -->
+            <div class="md:w-1/4 flex flex-col gap-4">
+                <!-- Search for Destination -->
+                <div class="relative">
+                    <input
+                        id="destination-search"
+                        type="text"
+                        placeholder="Search destination..."
+                        class="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                    />
+                    <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                    </svg>
+                    <!-- Search results dropdown -->
+                    <div id="search-results" class="absolute w-full bg-white border border-gray-300 rounded-lg shadow-lg z-10 hidden max-h-48 overflow-y-auto mt-1"></div>
+                </div>
+
+                <!-- Proximity Slider -->
+                <div>
+                    <label for="proximity-slider" class="block text-sm font-medium text-gray-700 mb-2">
+                        Alarm Trigger Distance: <span id="proximity-value">0.5</span> km
+                    </label>
+                    <input
+                        id="proximity-slider"
+                        type="range"
+                        min="0.1"
+                        max="5"
+                        step="0.1"
+                        value="0.5"
+                        class="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                </div>
+
+                <!-- Action Buttons -->
+                <button
+                    id="set-alarm-btn"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 transform hover:scale-105 shadow-md"
+                    disabled
+                >
+                    Set Alarm
+                </button>
+                <button
+                    id="clear-alarm-btn"
+                    class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 transform hover:scale-105 shadow-md"
+                    disabled
+                >
+                    Clear Alarm
+                </button>
+
+                <!-- Gemini API Button for Destination Insights -->
+                <button
+                    id="destination-insights-btn"
+                    class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 transform hover:scale-105 shadow-md mt-2"
+                    disabled
+                >
+                    ✨ Destination Insights
+                </button>
+
+                <!-- Status Display -->
+                <div id="status-display" class="bg-blue-100 border border-blue-300 text-blue-800 p-3 rounded-lg text-sm text-center">
+                    Awaiting destination...
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Box for Alerts (also used for Destination Insights) -->
+        <div id="message-box" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+            <div class="bg-white rounded-lg p-6 shadow-xl max-w-sm w-full text-center">
+                <h3 id="message-title" class="text-xl font-bold text-gray-900 mb-3"></h3>
+                <p id="message-content" class="text-gray-700 mb-5"></p>
+                <button id="close-message-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">
+                    OK
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Spinner for Gemini API calls -->
+        <div id="loading-spinner" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                <span class="text-white text-lg">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mapbox GL JS -->
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.js"></script>
+
+    <script>
+        // === Mapbox Access Token ===
+        // IMPORTANT: Replace 'YOUR_MAPBOX_ACCESS_TOKEN' with your actual Mapbox Public Access Token.
+        // You can get one from mapbox.com after signing up (it has a generous free tier).
+        mapboxgl.accessToken = 'pk.eyJ1IjoicHJhandhbG5tMjIiLCJhIjoiY21ldjFwOW50MGQ1MDJtc2g1MmlpbTlyNyJ9.BBnL5PRU5768GjDGqdoufw';
+
+        // === Gemini API Key ===
+        // IMPORTANT: Leave this as an empty string. The Canvas environment will inject the API key.
+        const geminiApiKey = "AIzaSyARdkaRogn-sS93dy26iCBoA60XUmLYJ80";
+
+        let map;
+        let userMarker;
+        let destinationMarker;
+        let watchId; // To store the ID returned by navigator.geolocation.watchPosition
+        let alarmInterval;
+        let destinationLocation = null; // Stored as { lat, lng } object
+        let destinationName = ''; // Store destination name for TTS
+        let alarmSound = new Audio(); // Will be used for TTS or fallback beep
+        let isAlarmActive = false;
+
+        const proximitySlider = document.getElementById('proximity-slider');
+        const proximityValueSpan = document.getElementById('proximity-value');
+        const setAlarmBtn = document.getElementById('set-alarm-btn');
+        const clearAlarmBtn = document.getElementById('clear-alarm-btn');
+        const destinationInsightsBtn = document.getElementById('destination-insights-btn');
+        const statusDisplay = document.getElementById('status-display');
+        const destinationSearchInput = document.getElementById('destination-search');
+        const searchResultsDiv = document.getElementById('search-results');
+        const messageBox = document.getElementById('message-box');
+        const messageTitle = document.getElementById('message-title');
+        const messageContent = document.getElementById('message-content');
+        const closeMessageBtn = document.getElementById('close-message-btn');
+        const loadingSpinner = document.getElementById('loading-spinner');
+
+        // --- Utility Functions for Audio Conversion (PCM to WAV) ---
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcm16, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+            const blockAlign = numChannels * bitsPerSample / 8;
+
+            const wavBuffer = new ArrayBuffer(44 + pcm16.length * 2);
+            const view = new DataView(wavBuffer);
+
+            // RIFF identifier
+            writeString(view, 0, 'RIFF');
+            // file length
+            view.setUint32(4, 36 + pcm16.length * 2, true);
+            // RIFF type
+            writeString(view, 8, 'WAVE');
+            // format chunk identifier
+            writeString(view, 12, 'fmt ');
+            // format chunk length
+            view.setUint32(16, 16, true);
+            // sample format (raw PCM)
+            view.setUint16(20, 1, true);
+            // channel count
+            view.setUint16(22, numChannels, true);
+            // sample rate
+            view.setUint32(24, sampleRate, true);
+            // byte rate (sample rate * block align)
+            view.setUint32(28, byteRate, true);
+            // block align (channel count * bytes per sample)
+            view.setUint16(32, blockAlign, true);
+            // bits per sample
+            view.setUint16(34, bitsPerSample, true);
+            // data chunk identifier
+            writeString(view, 36, 'data');
+            // data chunk length
+            view.setUint32(40, pcm16.length * 2, true);
+
+            // Write PCM data
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset + i * 2, pcm16[i], true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+        // --- End Utility Functions ---
+
+        // Function to display custom messages
+        function showMessage(title, content) {
+            messageTitle.textContent = title;
+            messageContent.textContent = content;
+            messageBox.classList.remove('hidden');
+        }
+
+        // Event listener for closing the message box
+        closeMessageBtn.addEventListener('click', () => {
+            messageBox.classList.add('hidden');
+            // Stop alarm sound if it's playing
+            alarmSound.pause();
+            alarmSound.currentTime = 0;
+        });
+
+        proximitySlider.addEventListener('input', (event) => {
+            proximityValueSpan.textContent = event.target.value;
+        });
+
+        // Haversine formula to calculate distance between two lat/lon points in km
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of Earth in kilometers
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const distance = R * c; // Distance in km
+            return distance;
+        }
+
+        // Initialize Mapbox Map
+        function initMap() {
+            // Default location if geolocation fails or is denied (e.g., Bengaluru)
+            const defaultLocation = { lat: 12.9716, lng: 77.5946 };
+
+            map = new mapboxgl.Map({
+                container: 'map', // container ID
+                style: 'mapbox://styles/mapbox/streets-v12', // style URL
+                center: [defaultLocation.lng, defaultLocation.lat], // starting position [lng, lat]
+                zoom: 12, // starting zoom
+                attributionControl: false // Hide default attribution for cleaner look, but ensure you include Mapbox attribution if publicly deploying
+            });
+
+            // Add navigation control (zoom and compass)
+            map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+            // Try to get user's current location
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const userLatLng = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                        };
+                        map.setCenter([userLatLng.lng, userLatLng.lat]);
+
+                        // Create a custom HTML element for the user marker
+                        const el = document.createElement('div');
+                        el.className = 'user-marker';
+
+                        userMarker = new mapboxgl.Marker(el)
+                            .setLngLat([userLatLng.lng, userLatLng.lat])
+                            .addTo(map);
+
+                        statusDisplay.textContent = "Location found. Select your destination.";
+                    },
+                    (error) => {
+                        console.error('Error getting user location:', error);
+                        statusDisplay.textContent = "Could not get your location. Using default center.";
+                        showMessage('Location Error', 'Could not retrieve your current location. Please ensure location services are enabled for this browser.');
+                        // Still initialize userMarker at default location
+                        const el = document.createElement('div');
+                        el.className = 'user-marker';
+                        el.style.backgroundColor = '#CCCCCC'; // Grey for default
+
+                        userMarker = new mapboxgl.Marker(el)
+                            .setLngLat([defaultLocation.lng, defaultLocation.lat])
+                            .addTo(map);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                statusDisplay.textContent = "Geolocation not supported by your browser. Using default center.";
+                showMessage('Browser Error', 'Geolocation is not supported by your browser. This app requires location services.');
+                // Still initialize userMarker at default location
+                const el = document.createElement('div');
+                el.className = 'user-marker';
+                el.style.backgroundColor = '#CCCCCC';
+
+                userMarker = new mapboxgl.Marker(el)
+                    .setLngLat([defaultLocation.lng, defaultLocation.lat])
+                    .addTo(map);
+            }
+
+            // Custom Geocoding Search (Mapbox Search API)
+            let searchTimeout;
+            destinationSearchInput.addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                const query = destinationSearchInput.value.trim();
+                if (query.length < 3) {
+                    searchResultsDiv.innerHTML = '';
+                    searchResultsDiv.classList.add('hidden');
+                    return;
+                }
+
+                searchTimeout = setTimeout(async () => {
+                    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxgl.accessToken}&autocomplete=true&limit=5`;
+                    try {
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        displaySearchResults(data.features);
+                    } catch (error) {
+                        console.error('Error fetching geocoding results:', error);
+                        searchResultsDiv.innerHTML = `<div class="p-2 text-red-600">Error fetching results.</div>`;
+                        searchResultsDiv.classList.remove('hidden');
+                    }
+                }, 300); // Debounce search input
+            });
+
+            // Handle selection from search results
+            searchResultsDiv.addEventListener('click', (event) => {
+                const target = event.target.closest('.search-result-item');
+                if (target) {
+                    const lng = parseFloat(target.dataset.lng);
+                    const lat = parseFloat(target.dataset.lat);
+                    const name = target.textContent;
+                    setDestination({ lat, lng }, name);
+                    destinationSearchInput.value = name;
+                    searchResultsDiv.innerHTML = '';
+                    searchResultsDiv.classList.add('hidden');
+                }
+            });
+
+            // Hide search results when clicking outside
+            document.addEventListener('click', (event) => {
+                if (!destinationSearchInput.contains(event.target) && !searchResultsDiv.contains(event.target)) {
+                    searchResultsDiv.classList.add('hidden');
+                }
+            });
+
+
+            // Allow setting destination by clicking on the map
+            map.on('click', (event) => {
+                setDestination({ lat: event.lngLat.lat, lng: event.lngLat.lng }, 'Custom Destination');
+            });
+        }
+
+        function displaySearchResults(features) {
+            searchResultsDiv.innerHTML = '';
+            if (features && features.length > 0) {
+                features.forEach(feature => {
+                    const li = document.createElement('div');
+                    li.className = 'p-2 cursor-pointer hover:bg-gray-100 search-result-item';
+                    li.textContent = feature.place_name;
+                    li.dataset.lat = feature.center[1]; // Mapbox returns [lng, lat]
+                    li.dataset.lng = feature.center[0];
+                    searchResultsDiv.appendChild(li);
+                });
+                searchResultsDiv.classList.remove('hidden');
+            } else {
+                searchResultsDiv.innerHTML = `<div class="p-2 text-gray-500">No results found.</div>`;
+                searchResultsDiv.classList.remove('hidden');
+            }
+        }
+
+
+        // Function to set the destination marker
+        function setDestination(location, title) {
+            if (destinationMarker) {
+                destinationMarker.remove(); // Remove previous marker
+            }
+            destinationLocation = location; // { lat, lng }
+            destinationName = title; // Store the name
+
+            // Create a custom HTML element for the destination marker
+            const el = document.createElement('div');
+            el.className = 'destination-marker';
+            el.innerHTML = '📍';
+
+            destinationMarker = new mapboxgl.Marker(el)
+                .setLngLat([destinationLocation.lng, destinationLocation.lat])
+                .addTo(map);
+
+            const popup = new mapboxgl.Popup({ offset: 25, closeButton: false })
+                .setLngLat([destinationLocation.lng, destinationLocation.lat])
+                .setHTML(`<div class="mapboxgl-popup-content"><h3>Destination Set:</h3><p>${title}</p></div>`)
+                .addTo(map);
+
+            // Center map on destination and zoom in
+            map.flyTo({ center: [destinationLocation.lng, destinationLocation.lat], zoom: 15 });
+
+            setAlarmBtn.disabled = false;
+            destinationInsightsBtn.disabled = false; // Enable insights button
+            statusDisplay.textContent = `Destination: ${title}. Ready to set alarm.`;
+        }
+
+        // --- Gemini API Integration for Destination Insights ---
+        destinationInsightsBtn.addEventListener('click', async () => {
+            if (!destinationName) {
+                showMessage('Error', 'Please set a destination first to get insights.');
+                return;
+            }
+
+            loadingSpinner.classList.remove('hidden'); // Show loading spinner
+
+            try {
+                const prompt = `Provide a concise and interesting fact or a very short summary (1-2 sentences) about ${destinationName}.`;
+                const chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                loadingSpinner.classList.add('hidden'); // Hide loading spinner
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessage('✨ Destination Insights', text);
+                } else {
+                    showMessage('API Error', 'Could not fetch destination insights. Please try again.');
+                    console.error('Gemini API response format unexpected:', result);
+                }
+            } catch (error) {
+                console.error('Error calling Gemini API for insights:', error);
+                loadingSpinner.classList.add('hidden'); // Hide loading spinner
+                showMessage('Error', 'Failed to get destination insights. Check your network or API key.');
+            }
+        });
+
+        // Start tracking and alarm
+        setAlarmBtn.addEventListener('click', () => {
+            if (!destinationLocation) {
+                showMessage('No Destination', 'Please select a destination on the map or search for one.');
+                return;
+            }
+            if (!userMarker) {
+                showMessage('Location Error', 'Cannot get your current location. Please ensure location services are enabled.');
+                return;
+            }
+
+            statusDisplay.textContent = 'Alarm set. Tracking your journey...';
+            setAlarmBtn.disabled = true;
+            clearAlarmBtn.disabled = false;
+            isAlarmActive = true;
+
+            // Start continuous location tracking
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const userLatLng = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude,
+                    };
+                    userMarker.setLngLat([userLatLng.lng, userLatLng.lat]); // Update user marker position
+
+                    // Calculate distance and check alarm
+                    const distance = getDistance(
+                        userLatLng.lat, userLatLng.lng,
+                        destinationLocation.lat, destinationLocation.lng
+                    );
+                    statusDisplay.textContent = `Distance to destination: ${distance.toFixed(2)} km.`;
+
+                    const proximityThreshold = parseFloat(proximitySlider.value);
+                    if (distance <= proximityThreshold && isAlarmActive) {
+                        triggerAlarm();
+                    }
+                },
+                (error) => {
+                    console.error('Error in watchPosition:', error);
+                    statusDisplay.textContent = 'Error tracking location.';
+                    showMessage('Tracking Error', 'There was an error continuously tracking your location. Please check your GPS signal.');
+                    clearAlarm(); // Clear alarm on error
+                },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+            );
+
+             // Also set up a periodic check with a shorter interval in case watchPosition is slow or inconsistent
+            alarmInterval = setInterval(() => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const userLatLng = {
+                                lat: position.coords.latitude,
+                                lng: position.coords.longitude,
+                            };
+                            userMarker.setLngLat([userLatLng.lng, userLatLng.lat]); // Update user marker position
+
+                            const distance = getDistance(
+                                userLatLng.lat, userLatLng.lng,
+                                destinationLocation.lat, destinationLocation.lng
+                            );
+                            statusDisplay.textContent = `Distance to destination: ${distance.toFixed(2)} km.`;
+
+                            const proximityThreshold = parseFloat(proximitySlider.value);
+                            if (distance <= proximityThreshold && isAlarmActive) {
+                                triggerAlarm();
+                            }
+                        },
+                        (error) => {
+                            console.warn('Geolocation error in interval check:', error);
+                        },
+                        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                    );
+                }
+            }, 5000); // Check every 5 seconds
+        });
+
+        // Trigger the alarm
+        async function triggerAlarm() {
+            if (!isAlarmActive) return;
+
+            // Try to generate and play TTS audio
+            try {
+                const ttsPrompt = `Say cheerfully: You are approaching your bus stop at ${destinationName}. Please prepare to deboard!`;
+                const payload = {
+                    contents: [{
+                        parts: [{ text: ttsPrompt }]
+                    }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: { voiceName: "Kore" } // Using Kore voice
+                            }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+                const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`;
+
+                const response = await fetch(ttsApiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                    const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 16000; // Default if not found
+
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    const pcm16 = new Int16Array(pcmData);
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+
+                    alarmSound.src = audioUrl;
+                    alarmSound.loop = true; // Loop the spoken alarm
+                    alarmSound.play().catch(e => {
+                        console.error("Error playing TTS audio:", e);
+                        // Fallback to simple beep if TTS fails to play
+                        new Audio('https://www.soundjay.com/buttons/beep-01a.mp3').play();
+                        showMessage('Alarm!', 'You are near your destination! Click OK to stop the alarm.');
+                    });
+                } else {
+                    console.error("Gemini TTS API response missing audio data:", result);
+                    // Fallback to simple beep if TTS response is bad
+                    alarmSound.src = 'https://www.soundjay.com/buttons/beep-01a.mp3';
+                    alarmSound.loop = true;
+                    alarmSound.play().catch(e => console.error("Error playing fallback alarm sound:", e));
+                }
+            } catch (error) {
+                console.error('Error calling Gemini TTS API:', error);
+                // Fallback to simple beep if TTS API call fails
+                alarmSound.src = 'https://www.soundjay.com/buttons/beep-01a.mp3';
+                alarmSound.loop = true;
+                alarmSound.play().catch(e => console.error("Error playing fallback alarm sound:", e));
+                showMessage('Alarm!', 'You are near your destination! Click OK to stop the alarm.');
+            }
+
+            // Vibrate if supported
+            if ('vibrate' in navigator) {
+                navigator.vibrate([1000, 500, 1000]); // Vibrate for 1s, pause 0.5s, vibrate 1s
+            }
+
+            showMessage('Alarm!', `You have reached near ${destinationName}!`);
+            isAlarmActive = false; // Deactivate alarm after triggering
+            clearAlarmBtn.disabled = false; // Allow clearing
+            setAlarmBtn.disabled = true; // Keep set alarm button disabled until cleared
+            clearInterval(alarmInterval); // Stop periodic checks
+            navigator.geolocation.clearWatch(watchId); // Stop watchPosition
+        }
+
+        // Clear the alarm
+        clearAlarmBtn.addEventListener('click', clearAlarm);
+
+        function clearAlarm() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            if (alarmInterval) {
+                clearInterval(alarmInterval);
+                alarmInterval = null;
+            }
+            if (alarmSound) {
+                alarmSound.pause();
+                alarmSound.currentTime = 0;
+                alarmSound.src = ''; // Clear audio source
+            }
+            isAlarmActive = false;
+            statusDisplay.textContent = 'Alarm cleared. Awaiting new destination.';
+            setAlarmBtn.disabled = false;
+            clearAlarmBtn.disabled = true;
+            destinationInsightsBtn.disabled = true; // Disable insights button
+            if (destinationMarker) {
+                destinationMarker.remove();
+                destinationMarker = null;
+                destinationLocation = null;
+                destinationName = '';
+            }
+            destinationSearchInput.value = ''; // Clear search input
+            searchResultsDiv.innerHTML = '';
+            searchResultsDiv.classList.add('hidden');
+        }
+
+        // Request audio permissions on first user interaction to avoid autoplay issues
+        document.body.addEventListener('click', function requestAudioPermission() {
+            // Attempt to play a silent sound or load alarmSound to prime audio context
+            // This helps in allowing later programmatic playback.
+            const dummyAudio = new Audio();
+            dummyAudio.volume = 0;
+            dummyAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='; // Smallest silent WAV
+            dummyAudio.play().catch(e => console.warn("Dummy audio play failed (expected on first load):", e));
+            alarmSound.load();
+            document.body.removeEventListener('click', requestAudioPermission);
+        });
+
+
+        // Initialize the map once the DOM is ready
+        document.addEventListener('DOMContentLoaded', initMap);
+
+    </script>
+</body>
+</html>
